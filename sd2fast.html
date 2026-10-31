@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101412">
+<title>OkroshkAI | Генерация видео</title>
+<style>
+  :root{color-scheme:dark;--bg:#101412;--surface:#191f1c;--surface-2:#202824;--line:#303b34;--text:#f0f5ef;--muted:#a5b5a8;--accent:#b4e66f;--accent-dark:#15210c;--danger:#ff958d;--radius:18px}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 'Segoe UI',system-ui,sans-serif}
+  body::before{content:'';position:fixed;inset:0 0 auto;height:440px;background:radial-gradient(ellipse at 75% -35%,rgba(180,230,111,.13),transparent 63%);pointer-events:none}
+  .app{position:relative;max-width:1440px;margin:auto;padding:0 32px 60px}
+  .topbar{height:82px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+  .brand{display:inline-flex;align-items:center;gap:12px;color:var(--text);text-decoration:none;font-size:20px;font-weight:750;letter-spacing:-.045em}
+  .brand-mark{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:var(--accent);color:#16210e;font-size:21px;font-weight:900;line-height:1}
+  .brand em{font-style:normal;color:var(--accent)}
+  .topbar-note{color:var(--muted);font-size:13px;letter-spacing:.02em}
+  .intro{padding:44px 0 30px}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+  .eyebrow::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px rgba(180,230,111,.12)}
+  h1{font-size:clamp(30px,4vw,52px);letter-spacing:-.06em;line-height:1.05;margin:14px 0 12px;font-weight:750}
+  .intro p{margin:0;color:var(--muted);font-size:16px;max-width:620px}
+  .workspace{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(340px,.88fr);gap:24px;align-items:start}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 20px 50px rgba(0,0,0,.12)}
+  .panel-header{padding:24px 26px 20px;border-bottom:1px solid var(--line)}
+  .panel-header h2{font-size:19px;letter-spacing:-.035em;margin:0 0 4px}
+  .panel-header p{font-size:13px;color:var(--muted);margin:0}
+  .panel-body{padding:22px 26px 26px}
+  .field{margin-bottom:22px}
+  .field:last-child{margin-bottom:0}
+  .field-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:9px}
+  .field-head label,.field-head .label{font-size:13px;font-weight:700;color:var(--text);margin:0}
+  .hint{font-size:12px;color:var(--muted)}
+  textarea,input:not([type=radio]):not([type=file]),select{width:100%;background:#121814;border:1px solid #3a483d;border-radius:11px;color:var(--text);padding:12px 14px;font:inherit;outline:none;transition:border-color .2s,box-shadow .2s}
+  textarea{min-height:132px;resize:vertical;line-height:1.6}
+  textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(180,230,111,.14)}
+  input::placeholder,textarea::placeholder{color:#839385}
+  .models{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .model{display:flex;gap:12px;align-items:flex-start;margin:0;padding:15px;border:1px solid #3a483d;border-radius:12px;background:#151b17;cursor:pointer;transition:background .2s,border-color .2s}
+  .model:hover{background:#1d271e}
+  .model:has(input:checked){border-color:var(--accent);background:#202c1d;box-shadow:inset 0 0 0 1px rgba(180,230,111,.15)}
+  .model input{accent-color:var(--accent);margin:4px 0 0;flex:none}
+  .model strong{display:block;font-size:14px;line-height:1.3}
+  .model small{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+  .ref-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .ref{display:block;position:relative;min-height:106px;padding:14px 12px;border:1px dashed #536155;border-radius:12px;background:#151b17;cursor:pointer;transition:border-color .2s,background .2s}
+  .ref:hover,.ref:focus-within{border-color:var(--accent);background:#1d271e}
+  .ref-symbol{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:#2b382a;color:var(--accent);font-size:20px;line-height:1;margin-bottom:9px}
+  .ref strong{display:block;color:var(--text);font-size:13px;line-height:1.2}
+  .ref small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+  .ref input{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .row .field{margin-bottom:0}
+  .settings{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
+  .settings summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:650;list-style:none}
+  .settings summary::-webkit-details-marker{display:none}
+  .settings summary::before{content:'+';display:inline-grid;place-items:center;margin-right:8px;width:18px;height:18px;border:1px solid var(--line);border-radius:5px;color:var(--accent)}
+  .settings[open] summary::before{content:'−'}
+  #keyrow{display:flex;gap:8px;margin-top:12px}
+  #keyrow input{min-width:0;font-family:Consolas,monospace;font-size:12px}
+  button{font:inherit;cursor:pointer;border:0}
+  .secondary{background:#2b362e;color:var(--text);border:1px solid #465347;border-radius:10px;padding:10px 16px;white-space:nowrap}
+  .secondary:hover{background:#364439}
+  .actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:24px}
+  #go{background:var(--accent);color:var(--accent-dark);border-radius:11px;padding:13px 25px;font-weight:800;box-shadow:0 6px 18px rgba(180,230,111,.12);transition:transform .2s,background .2s}
+  #go:hover:not(:disabled){background:#c3f17f;transform:translateY(-1px)}
+  #go:disabled{opacity:.55;cursor:wait}
+  .action-note{font-size:12px;color:var(--muted)}
+  #timer,#error{font-size:13px;margin-top:12px}
+  #timer{color:var(--accent)}
+  #error{color:var(--danger)}
+  .preview-panel{position:sticky;top:24px;overflow:hidden}
+  .preview-screen{aspect-ratio:16/10;margin:24px;border:1px solid #3b4b3d;border-radius:13px;background:radial-gradient(circle at 50% 48%,#28392b,#111713 72%);display:grid;place-items:center;text-align:center;overflow:hidden}
+  .preview-inner{padding:24px}
+  .preview-icon{width:62px;height:62px;border:1px solid #6f8b66;border-radius:18px;display:grid;place-items:center;margin:0 auto 16px;color:var(--accent);font-size:28px;box-shadow:0 0 38px rgba(180,230,111,.08)}
+  .preview-inner strong{display:block;font-size:16px;letter-spacing:-.02em}
+  .preview-inner span{display:block;color:var(--muted);font-size:12px;margin-top:5px}
+  .preview-footer{padding:0 24px 24px;display:flex;justify-content:space-between;gap:16px;color:var(--muted);font-size:12px}
+  .preview-footer b{color:var(--text);font-weight:600}
+  #doneCard{margin-top:16px;padding:20px 24px}
+  #doneCard h2{margin:0 0 14px;font-size:17px}
+  #done video{width:100%;border-radius:10px;display:block;background:#000}
+  #done p{margin:14px 0 0}
+  #done a{color:var(--accent);font-weight:700;text-decoration:none}
+  #done a:hover{text-decoration:underline}
+  .api-panel{margin-top:24px;overflow:hidden}
+  .api-body{padding:24px 26px 28px}
+  .api-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}
+  .api-grid h3{font-size:15px;margin:0 0 8px}
+  .api-grid p{font-size:13px;color:var(--muted);margin:0 0 16px}
+  .api-row{display:flex;gap:8px;margin-bottom:10px}
+  .api-row input{min-width:0}
+  .api-row button{flex:none}
+  .api-help{font-size:12px;color:var(--muted)}
+  .api-help code{color:var(--accent)}
+  .api-message{margin-top:12px;font-size:13px;min-height:20px;color:var(--accent);overflow-wrap:anywhere}
+  .api-message.error{color:var(--danger)}
+  .new-token{display:none;margin-top:12px;padding:14px;border:1px solid var(--accent);border-radius:11px;background:#202c1d}
+  .new-token label{display:block;font-size:12px;color:var(--muted);margin-bottom:8px}
+  .new-token code{display:block;font-size:12px;color:var(--text);overflow-wrap:anywhere;user-select:all}
+  .token-list{display:grid;gap:8px;margin-top:12px}
+  .token-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#151b17}
+  .token-item strong{display:block;font-size:13px}
+  .token-item small{display:block;color:var(--muted);font-family:Consolas,monospace;margin-top:3px}
+  .token-item button{color:var(--danger);background:transparent;border:1px solid #6b3a38;border-radius:8px;padding:7px 10px;font-size:12px}
+  .api-code{background:#111713;border:1px solid var(--line);border-radius:11px;padding:16px;color:var(--text);font:12px/1.7 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  @media(max-width:900px){.workspace,.api-grid{grid-template-columns:1fr}.preview-panel{position:static}.preview-screen{aspect-ratio:16/8}}
+  @media(max-width:600px){.app{padding:0 16px 40px}.topbar{height:68px}.topbar-note{display:none}.intro{padding:34px 0 24px}.panel-header{padding:20px}.panel-body{padding:20px}.ref-grid{grid-template-columns:1fr}.ref{min-height:0;display:grid;grid-template-columns:28px 1fr;column-gap:10px;align-items:center}.ref-symbol{grid-row:span 2;margin:0}.models{grid-template-columns:1fr}.preview-screen{margin:18px;aspect-ratio:4/3}.preview-footer{padding:0 18px 18px}}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="OkroshkAI, главная"><span class="brand-mark" aria-hidden="true">O</span><span>Okroshk<em>AI</em></span></a>
+    <span class="topbar-note">Видеостудия</span>
+  </header>
+
+  <section class="intro" aria-labelledby="page-title">
+    <span class="eyebrow">Создание видео</span>
+    <h1 id="page-title">Идея становится видео.</h1>
+    <p>Опишите сцену, настройте формат и добавьте референсы. OkroshkAI соберёт всё в одном месте.</p>
+  </section>
+
+  <main class="workspace">
+    <section class="panel" aria-labelledby="settings-title">
+      <div class="panel-header"><h2 id="settings-title">Параметры генерации</h2><p>Укажите, каким должно быть ваше видео.</p></div>
+      <div class="panel-body">
+        <div class="field">
+          <div class="field-head"><span class="label" id="model-label">Модель</span><span class="hint">Выберите режим</span></div>
+          <div class="models" role="radiogroup" aria-labelledby="model-label">
+            <label class="model"><input type="radio" name="model" value="fast" checked><span><strong>SD 2 Fast</strong><small>Быстрее создаёт видео</small></span></label>
+            <label class="model"><input type="radio" name="model" value="sd2"><span><strong>SD 2</strong><small>Больше деталей в кадре</small></span></label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-head"><label for="prompt">Описание сцены</label><span class="hint">Что должно быть в кадре?</span></div>
+          <textarea id="prompt" placeholder="Например: утренний свет скользит по заснеженным горам…">A cinematic drone shot of a snowy mountain at sunrise, warm light</textarea>
+        </div>
+
+        <div class="field">
+          <div class="field-head"><span class="label" id="refs-label">Референсы</span><span class="hint">При необходимости</span></div>
+          <div class="ref-grid" aria-labelledby="refs-label">
+            <label class="ref"><span class="ref-symbol" aria-hidden="true">+</span><strong>Фото</strong><small>До 8 файлов</small><input type="file" id="imgs" accept="image/*" multiple></label>
+            <label class="ref"><span class="ref-symbol" aria-hidden="true">+</span><strong>Видео</strong><small>До 3 файлов</small><input type="file" id="vids" accept="video/*" multiple></label>
+            <label class="ref"><span class="ref-symbol" aria-hidden="true">+</span><strong>Аудио</strong><small>До 3 файлов</small><input type="file" id="auds" accept="audio/*" multiple></label>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field"><div class="field-head"><label for="dur">Длительность</label><span class="hint">4–15 сек</span></div><input id="dur" type="number" min="4" max="15" value="4"></div>
+          <div class="field"><div class="field-head"><label for="ratio">Формат кадра</label></div><select id="ratio"><option>16:9</option><option>9:16</option><option>1:1</option></select></div>
+        </div>
+
+        <details class="settings"><summary>Настройки доступа</summary><div id="keyrow"><input id="key" type="password" aria-label="API ключ" placeholder="Получаю ключ…"><button id="getkey" class="secondary" type="button">Обновить ключ</button></div></details>
+        <div class="actions"><button id="go" type="button">Сгенерировать видео</button><span class="action-note">Результат появится справа</span></div>
+        <div id="timer" role="status" aria-live="polite" style="display:none"></div>
+        <div id="error" role="alert" style="display:none"></div>
+      </div>
+    </section>
+
+    <div>
+      <section class="panel preview-panel" aria-labelledby="preview-title">
+        <div class="panel-header"><h2 id="preview-title">Предпросмотр</h2><p>Здесь появится готовый ролик.</p></div>
+        <div class="preview-screen"><div class="preview-inner"><div class="preview-icon" aria-hidden="true">▶</div><strong>Ваш следующий кадр ждёт</strong><span>Запустите генерацию, чтобы увидеть результат</span></div></div>
+        <div class="preview-footer"><span>Модель <b id="preview-model">SD 2 Fast</b></span><span>Формат <b id="preview-ratio">16:9</b></span></div>
+      </section>
+      <section class="panel" id="doneCard" style="display:none" aria-labelledby="done-title"><h2 id="done-title">Готовое видео</h2><div id="done"></div></section>
+    </div>
+  </main>
+
+  <section class="panel api-panel" aria-labelledby="api-title">
+    <div class="panel-header"><h2 id="api-title">API для приложений</h2><p>Создавайте отдельные токены для внешних клиентов и управляйте доступом.</p></div>
+    <div class="api-body api-grid">
+      <div>
+        <h3>Управление токенами</h3>
+        <p>Введите токен администратора из файла <code>admin_token.txt</code> в папке данных сервера. Токен приложения показывается один раз после создания.</p>
+        <div class="api-row"><input id="adminToken" type="password" autocomplete="off" aria-label="Токен администратора" placeholder="Токен администратора"><button id="loadTokens" class="secondary" type="button">Показать</button></div>
+        <div class="api-row"><input id="appName" type="text" maxlength="64" aria-label="Название приложения" placeholder="Название приложения"><button id="createToken" class="secondary" type="button">Создать токен</button></div>
+        <div class="api-help">Токен администратора остаётся только в открытой вкладке и не сохраняется браузером.</div>
+        <div id="apiMessage" class="api-message" role="status" aria-live="polite"></div>
+        <div id="newToken" class="new-token"><label>Новый токен приложения. Скопируйте сейчас:</label><code id="newTokenValue"></code></div>
+        <div id="tokenList" class="token-list"></div>
+      </div>
+      <div>
+        <h3>Как отправить запрос</h3>
+        <p>Приложение передаёт свой токен один раз при запуске генерации. Для проверки конкретного задания используется его отдельный ключ.</p>
+        <div class="api-code">POST /api/v1/generations
+Authorization: Bearer okai_ВАШ_ТОКЕН
+Content-Type: application/json
+
+{"prompt":"A snowy mountain at sunrise","model":"fast","duration":4,"ratio":"16:9"}
+
+GET /api/v1/generations/ID_ЗАДАНИЯ
+X-Request-Key: sk-КЛЮЧ_ИЗ_ОТВЕТА</div>
+      </div>
+    </div>
+  </section>
+</div>
+<script>
+let cancelled=false;
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+let cachedKey="";
+function savedKey(){
+  try{return localStorage.getItem("k_key")||cachedKey;}catch(e){return cachedKey;}
+}
+function rememberKey(key){
+  cachedKey=key;
+  try{localStorage.setItem("k_key",key);}catch(e){}
+}
+function forgetKey(){
+  cachedKey="";
+  try{localStorage.removeItem("k_key");}catch(e){}
+}
+async function readJson(response,context){
+  try{return await response.json();}
+  catch(e){throw new Error(`${context}: сервер вернул некорректный ответ (HTTP ${response.status})`);}
+}
+
+async function getKey(){
+  const inp=document.getElementById("key");
+  const saved=savedKey();
+  if(saved){ inp.value=saved; return saved; }
+  try{
+    const r=await fetch("/api/keys",{method:"POST"});
+    const j=await r.json();
+    if(j.key){
+      inp.value=j.key;
+      rememberKey(j.key);
+      return j.key;
+    }
+  }catch(e){}
+  return "";
+}
+document.getElementById("getkey").onclick=async()=>{
+  forgetKey();
+  document.getElementById("key").value="";
+  await getKey();
+};
+
+async function uploadRef(file){
+  const limit=128*1024*1024;
+  if(file.size>limit) throw new Error(`${file.name}: файл больше 128 МиБ`);
+  const fd=new FormData();
+  fd.append("files[]", file, file.name);
+  let r;
+  try{r=await fetch("/api/upload", {method:"POST", body:fd});}
+  catch(e){throw new Error(`${file.name}: связь с сервером прервалась при загрузке`);}
+  let j;
+  try{j=await r.json();}
+  catch(e){throw new Error(`${file.name}: сервер вернул некорректный ответ при загрузке`);}
+  if(!r.ok) throw new Error(`${file.name}: ${j.error||`ошибка загрузки HTTP ${r.status}`}`);
+  const url=j.files && j.files[0] && j.files[0].url;
+  if(!url) throw new Error(`${file.name}: ссылка на файл не получена`);
+  return url;
+}
+async function collectRefs(onProgress=()=>{}){
+  const out=[];
+  const groups=[
+    ["imgs","image","reference_image",8],
+    ["vids","video","reference_video",3],
+    ["auds","audio","reference_audio",3],
+  ];
+  const total=groups.reduce((sum,[id,,,max])=>sum+Math.min(document.getElementById(id).files.length,max),0);
+  for(const [id,type,role,max] of groups){
+    let n=0;
+    for(const f of document.getElementById(id).files){
+      if(n>=max) break;
+      onProgress(out.length+1,total);
+      out.push({url:await uploadRef(f), type, role});
+      n++;
+    }
+  }
+  return out;
+}
+
+async function ensureKey(){
+  let key=document.getElementById("key").value.trim();
+  if(key) return key;
+  return await getKey();
+}
+
+async function fetchKeyFresh(){
+  forgetKey();
+  document.getElementById("key").value="";
+  return await getKey();
+}
+
+document.getElementById("go").onclick = async ()=>{
+  const btn=document.getElementById("go");
+  btn.disabled=true; btn.textContent="Генерация…"; cancelled=false;
+  const errEl=document.getElementById("error"); errEl.style.display="none";
+  const timerEl=document.getElementById("timer");
+  let phase="Подготовка";
+  timerEl.style.display="block"; timerEl.textContent=phase;
+  const t0=Date.now();
+  const tick=setInterval(()=>{ timerEl.textContent=`${phase} · ${Math.round((Date.now()-t0)/1000)} сек`; },500);
+  document.getElementById("doneCard").style.display="none";
+  document.querySelector(".preview-panel").style.display="block";
+  document.getElementById("done").innerHTML="";
+  try{
+    let key=await ensureKey();
+    if(!key) key=await fetchKeyFresh();
+    if(!key) throw new Error("нет API ключа");
+
+    const prompt=document.getElementById("prompt").value.trim();
+    const duration=Math.max(4,Math.min(15,parseInt(document.getElementById("dur").value)||4));
+    const ratio=document.getElementById("ratio").value;
+    const model=document.querySelector('input[name=model]:checked').value;
+    const refs=await collectRefs((current,total)=>{phase=`Загрузка референса ${current} из ${total}`;});
+    phase="Генерация видео";
+
+    let r=await fetch("/api/run",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","X-Api-Key":key},
+      body:JSON.stringify({key, prompt, duration, ratio, model, refs})
+    });
+    let j=await readJson(r,"Запуск генерации");
+    if(r.status===403){
+      key=await fetchKeyFresh();
+      if(!key) throw new Error("нет API ключа");
+      r=await fetch("/api/run",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","X-Api-Key":key},
+        body:JSON.stringify({key, prompt, duration, ratio, model, refs})
+      });
+      j=await readJson(r,"Запуск генерации");
+    }
+    if(!r.ok || !j.job) throw new Error(j.error || ("HTTP "+r.status));
+
+    const deadline=Date.now()+20*60*1000;
+    let url=null;
+    let statusFailures=0;
+    while(Date.now()<deadline && !cancelled){
+      await sleep(4000);
+      let response;
+      try{response=await fetch("/api/status?id="+encodeURIComponent(j.job));}
+      catch(e){
+        if(++statusFailures>=5) throw new Error("не удалось связаться с сервером для проверки результата");
+        continue;
+      }
+      if(response.status===404) throw new Error("задание не найдено; возможно, сервер перезапустился");
+      if(response.status>=500){
+        if(++statusFailures>=5) throw new Error(`сервер не отвечает при проверке результата: HTTP ${response.status}`);
+        continue;
+      }
+      if(!response.ok) throw new Error(`ошибка проверки результата: HTTP ${response.status}`);
+      statusFailures=0;
+      const s=await readJson(response,"Проверка результата");
+      if(s.state==="done"){
+        if(!s.url) throw new Error("генерация завершена, но ссылка на видео не получена");
+        url=s.url; break;
+      }
+      if(s.state==="error") throw new Error(s.message || "failed");
+    }
+    if(!url) throw new Error("время ожидания истекло; проверьте состояние сервера");
+
+    const wrap=document.getElementById("done");
+    const v=document.createElement("video"); v.controls=true; v.autoplay=true; v.src=url;
+    wrap.appendChild(v);
+    const a=document.createElement("p");
+    const link=document.createElement("a");
+    link.href=url; link.target="_blank"; link.rel="noopener noreferrer"; link.download=""; link.textContent="Скачать / открыть видео";
+    a.appendChild(link);
+    wrap.appendChild(a);
+    document.getElementById("doneCard").style.display="block";
+    document.querySelector(".preview-panel").style.display="none";
+  }catch(e){
+    errEl.textContent="ошибка: "+e.message;
+    errEl.style.display="block";
+  }finally{
+    clearInterval(tick);
+    timerEl.style.display="none";
+    btn.textContent="Сгенерировать видео";
+    btn.disabled=false;
+  }
+};
+
+document.querySelectorAll('input[name="model"]').forEach(input=>input.addEventListener('change',()=>{
+  document.getElementById('preview-model').textContent=input.value==='fast'?'SD 2 Fast':'SD 2';
+}));
+document.getElementById('ratio').addEventListener('change',event=>{
+  document.getElementById('preview-ratio').textContent=event.target.value;
+});
+for(const id of ['imgs','vids','auds']){
+  document.getElementById(id).addEventListener('change',event=>{
+    const label=event.target.closest('.ref');
+    const count=event.target.files.length;
+    label.querySelector('small').textContent=count?`${count} файл${count===1?'':count<5?'а':'ов'} выбрано`:({imgs:'До 8 файлов',vids:'До 3 файлов',auds:'До 3 файлов'}[id]);
+  });
+}
+const apiMessage=document.getElementById('apiMessage');
+function showApiMessage(message,isError=false){
+  apiMessage.textContent=message;
+  apiMessage.classList.toggle('error',isError);
+}
+async function adminRequest(path,options={}){
+  const token=document.getElementById('adminToken').value.trim();
+  if(!token) throw new Error('Введите токен администратора');
+  const response=await fetch(path,{
+    ...options,
+    headers:{'X-Admin-Token':token,...(options.headers||{})}
+  });
+  const data=await response.json();
+  if(!response.ok) throw new Error(data.error||`HTTP ${response.status}`);
+  return data;
+}
+async function loadAppTokens(){
+  const data=await adminRequest('/api/admin/tokens');
+  const list=document.getElementById('tokenList');
+  list.replaceChildren();
+  if(!data.tokens.length){
+    showApiMessage('Токенов приложений пока нет.');
+    return;
+  }
+  for(const token of data.tokens){
+    const item=document.createElement('div'); item.className='token-item';
+    const info=document.createElement('div');
+    const name=document.createElement('strong'); name.textContent=token.name;
+    const prefix=document.createElement('small'); prefix.textContent=token.prefix+'…';
+    info.append(name,prefix);
+    const revoke=document.createElement('button'); revoke.type='button'; revoke.textContent='Отозвать';
+    revoke.onclick=async()=>{
+      try{
+        await adminRequest('/api/admin/tokens/'+encodeURIComponent(token.id),{method:'DELETE'});
+        item.remove(); showApiMessage('Токен отозван.');
+      }catch(error){showApiMessage(error.message,true);}
+    };
+    item.append(info,revoke); list.appendChild(item);
+  }
+  showApiMessage(`Активных токенов: ${data.tokens.length}`);
+}
+document.getElementById('loadTokens').onclick=async()=>{
+  try{await loadAppTokens();}catch(error){showApiMessage(error.message,true);}
+};
+document.getElementById('createToken').onclick=async()=>{
+  const name=document.getElementById('appName').value.trim();
+  if(!name){showApiMessage('Введите название приложения.',true);return;}
+  try{
+    const data=await adminRequest('/api/admin/tokens',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})
+    });
+    document.getElementById('newTokenValue').textContent=data.token;
+    document.getElementById('newToken').style.display='block';
+    document.getElementById('appName').value='';
+    await loadAppTokens();
+    showApiMessage('Токен создан. Скопируйте его сейчас.');
+  }catch(error){showApiMessage(error.message,true);}
+};
+getKey();
+</script>
+</body>
+</html>
