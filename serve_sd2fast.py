@@ -7,6 +7,7 @@ import random
 import re
 import secrets
 import string
+import tempfile
 import threading
 import time
 import urllib.error
@@ -16,6 +17,7 @@ from http.cookiejar import CookieJar
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "8765"))
+APP_VERSION = "2026-10-31-upload-fix-2"
 DATA_DIR = os.path.abspath(os.environ.get(
     "OKROSHKAI_DATA_DIR", os.path.dirname(os.path.abspath(__file__))))
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -23,6 +25,7 @@ SITE = "http://43.173.73.4:3000"
 TMP_RPC = "http://papi2.temp-mail.org/rpc/"
 TM_API = "https://api.mail.tm"
 UGUU = "https://uguu.se/upload"
+UGUU_LEGACY = "https://uguu.se/upload.php"
 KEY_RE = re.compile(r"^sk-[A-Za-z0-9_-]{16,}$")
 MAX_KEYS = 5000
 MAX_EXTERNAL_TOKENS = 200
@@ -221,13 +224,15 @@ def http(op, url, data=None, headers=None, timeout=90, retries=4):
     raise last
 
 
-def upload_to_uguu(source, length, content_type):
-    endpoint = urllib.parse.urlsplit(UGUU)
+def upload_to_uguu(source, length, content_type, url=UGUU):
+    endpoint = urllib.parse.urlsplit(url)
     connection = http_client.HTTPSConnection(endpoint.hostname, timeout=180)
     try:
         connection.putrequest("POST", endpoint.path)
         connection.putheader("Content-Type", content_type)
         connection.putheader("Content-Length", str(length))
+        connection.putheader("User-Agent", "OkroshkAI/1.0")
+        connection.putheader("Accept", "application/json")
         connection.endheaders()
         remaining = length
         while remaining:
@@ -429,6 +434,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-OkroshkAI-Version", APP_VERSION)
         self.end_headers()
         self.wfile.write(raw)
 
@@ -455,6 +461,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/health":
+            self._send(200, {"status": "ok", "version": APP_VERSION})
+            return
         if parsed.path == "/" or parsed.path == "/index.html":
             with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sd2fast.html"), "rb") as f:
                 self._send(200, raw=f.read(), ctype="text/html; charset=utf-8")
@@ -566,33 +575,43 @@ class Handler(BaseHTTPRequestHandler):
             if not ct.lower().startswith("multipart/form-data;"):
                 self._send(415, {"error": "Ожидается загрузка файла через multipart/form-data."})
                 return
+            self.connection.settimeout(180)
             try:
-                self.connection.settimeout(180)
-                st, resp = upload_to_uguu(self.rfile, length, ct)
-            except ValueError as e:
-                self._send(400, {"error": str(e)})
-                return
-            except Exception as e:
-                self._send(502, {"error": "Хранилище недоступно: " + str(e)[:160]})
-                return
-            try:
-                result = json.loads(resp)
-            except (ValueError, UnicodeDecodeError):
-                self._send(502, {"error": "Хранилище вернуло некорректный ответ."})
-                return
-            if not isinstance(result, dict):
-                self._send(502, {"error": "Хранилище вернуло некорректный ответ."})
-                return
-            if st != 200 or result.get("success") is False:
-                reason = result.get("description") or result.get("error") or "Загрузка отклонена хранилищем."
-                self._send(st if 400 <= st <= 599 else 502, {"error": str(reason)[:200]})
-                return
-            files = result.get("files") or []
-            url = files[0].get("url") if files and isinstance(files[0], dict) else None
-            if not isinstance(url, str) or not url.startswith("https://"):
-                self._send(502, {"error": "Хранилище не вернуло ссылку на файл."})
-                return
-            self._send(200, {"files": [{"url": url}]})
+                with tempfile.TemporaryFile() as staged:
+                    remaining = length
+                    while remaining:
+                        chunk = self.rfile.read(min(64 * 1024, remaining))
+                        if not chunk:
+                            self._send(400, {"error": "Файл получен не полностью."})
+                            return
+                        staged.write(chunk)
+                        remaining -= len(chunk)
+
+                    last_error = "Хранилище недоступно."
+                    for attempt, endpoint in enumerate((UGUU, UGUU_LEGACY, UGUU)):
+                        staged.seek(0)
+                        try:
+                            st, resp = upload_to_uguu(staged, length, ct, endpoint)
+                            result = json.loads(resp)
+                            if not isinstance(result, dict):
+                                raise ValueError("Хранилище вернуло некорректный ответ.")
+                            files = result.get("files") or []
+                            url = files[0].get("url") if files and isinstance(files[0], dict) else None
+                            if st == 200 and result.get("success") is not False and isinstance(url, str) and url.startswith("https://"):
+                                self._send(200, {"files": [{"url": url}]})
+                                return
+                            reason = result.get("description") or result.get("error") or "Ошибка хранилища."
+                            if st in (413, 415):
+                                self._send(st, {"error": str(reason)[:200]})
+                                return
+                            last_error = str(reason)[:200]
+                        except Exception as e:
+                            last_error = str(e)[:200]
+                        if attempt < 2:
+                            time.sleep(attempt + 1)
+                    self._send(502, {"error": "Uguu: " + last_error + " (после 3 попыток)"})
+            except OSError as e:
+                self._send(507, {"error": "Недостаточно места для временного файла: " + str(e)[:120]})
             return
         self._send(404, {"error": "not found"})
 
