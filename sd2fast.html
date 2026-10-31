@@ -50,6 +50,17 @@
   .ref strong{display:block;color:var(--text);font-size:13px;line-height:1.2}
   .ref small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
   .ref input{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+  .ref-preview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}
+  .ref-item{position:relative;min-width:0;border:1px solid var(--line);border-radius:11px;background:#111713;overflow:hidden}
+  .ref-item img,.ref-item .ref-placeholder{width:100%;height:94px;background:#263329}
+  .ref-item img{display:block;object-fit:cover}
+  .ref-placeholder{display:grid;place-items:center;color:var(--accent);font-size:12px;font-weight:700}
+  .ref-info{padding:8px 10px 10px;min-width:0}
+  .ref-info strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+  .ref-info small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+  .ref-remove{position:absolute;right:6px;top:6px;display:grid;place-items:center;width:26px;height:26px;border:1px solid #687569;border-radius:8px;background:rgba(16,20,18,.9);color:var(--text);font-size:17px;line-height:1}
+  .ref-remove:hover{background:#3c2625;color:var(--danger)}
+  .ref-message{min-height:18px;margin-top:8px;color:var(--danger);font-size:12px}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .row .field{margin-bottom:0}
   .settings{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
@@ -107,7 +118,7 @@
   .api-code{background:#111713;border:1px solid var(--line);border-radius:11px;padding:16px;color:var(--text);font:12px/1.7 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
   :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
   @media(max-width:900px){.workspace,.api-grid{grid-template-columns:1fr}.preview-panel{position:static}.preview-screen{aspect-ratio:16/8}}
-  @media(max-width:600px){.app{padding:0 16px 40px}.topbar{height:68px}.topbar-note{display:none}.intro{padding:34px 0 24px}.panel-header{padding:20px}.panel-body{padding:20px}.ref-grid{grid-template-columns:1fr}.ref{min-height:0;display:grid;grid-template-columns:28px 1fr;column-gap:10px;align-items:center}.ref-symbol{grid-row:span 2;margin:0}.models{grid-template-columns:1fr}.preview-screen{margin:18px;aspect-ratio:4/3}.preview-footer{padding:0 18px 18px}}
+  @media(max-width:600px){.app{padding:0 16px 40px}.topbar{height:68px}.topbar-note{display:none}.intro{padding:34px 0 24px}.panel-header{padding:20px}.panel-body{padding:20px}.ref-grid{grid-template-columns:1fr}.ref{min-height:0;display:grid;grid-template-columns:28px 1fr;column-gap:10px;align-items:center}.ref-symbol{grid-row:span 2;margin:0}.ref-preview{grid-template-columns:repeat(2,minmax(0,1fr))}.models{grid-template-columns:1fr}.preview-screen{margin:18px;aspect-ratio:4/3}.preview-footer{padding:0 18px 18px}}
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 </style>
 </head>
@@ -148,6 +159,8 @@
             <label class="ref"><span class="ref-symbol" aria-hidden="true">+</span><strong>Видео</strong><small>До 3 файлов</small><input type="file" id="vids" accept="video/*" multiple></label>
             <label class="ref"><span class="ref-symbol" aria-hidden="true">+</span><strong>Аудио</strong><small>До 3 файлов</small><input type="file" id="auds" accept="audio/*" multiple></label>
           </div>
+          <div id="refPreview" class="ref-preview" aria-label="Добавленные референсы"></div>
+          <div id="refMessage" class="ref-message" role="status" aria-live="polite"></div>
         </div>
 
         <div class="row">
@@ -204,6 +217,9 @@ X-Request-Key: sk-КЛЮЧ_ИЗ_ОТВЕТА</div>
 let cancelled=false;
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 let cachedKey="";
+const refLimits={imgs:8,vids:3,auds:3};
+const refNames={imgs:'фото',vids:'видео',auds:'аудио'};
+const selectedRefs={imgs:[],vids:[],auds:[]};
 function savedKey(){
   try{return localStorage.getItem("k_key")||cachedKey;}catch(e){return cachedKey;}
 }
@@ -260,18 +276,16 @@ async function uploadRef(file){
 async function collectRefs(onProgress=()=>{}){
   const out=[];
   const groups=[
-    ["imgs","image","reference_image",8],
-    ["vids","video","reference_video",3],
-    ["auds","audio","reference_audio",3],
+    ["imgs","image","reference_image"],
+    ["vids","video","reference_video"],
+    ["auds","audio","reference_audio"],
   ];
-  const total=groups.reduce((sum,[id,,,max])=>sum+Math.min(document.getElementById(id).files.length,max),0);
-  for(const [id,type,role,max] of groups){
-    let n=0;
-    for(const f of document.getElementById(id).files){
-      if(n>=max) break;
+  const filesByGroup=groups.map(([id,type,role])=>({type,role,files:selectedRefs[id].map(item=>item.file)}));
+  const total=filesByGroup.reduce((sum,group)=>sum+group.files.length,0);
+  for(const {type,role,files} of filesByGroup){
+    for(const f of files){
       onProgress(out.length+1,total);
       out.push({url:await uploadRef(f), type, role});
-      n++;
     }
   }
   return out;
@@ -385,11 +399,55 @@ document.querySelectorAll('input[name="model"]').forEach(input=>input.addEventLi
 document.getElementById('ratio').addEventListener('change',event=>{
   document.getElementById('preview-ratio').textContent=event.target.value;
 });
+function renderRefs(){
+  const preview=document.getElementById('refPreview');
+  preview.replaceChildren();
+  for(const id of ['imgs','vids','auds']){
+    const entries=selectedRefs[id];
+    document.getElementById(id).closest('.ref').querySelector('small').textContent=
+      entries.length?`${entries.length} из ${refLimits[id]} добавлено`:`До ${refLimits[id]} файлов`;
+    entries.forEach((entry,index)=>{
+      const tile=document.createElement('div'); tile.className='ref-item';
+      if(id==='imgs'){
+        const image=document.createElement('img');
+        image.src=entry.previewUrl; image.alt=`Референс: ${entry.file.name}`;
+        tile.appendChild(image);
+      }else{
+        const placeholder=document.createElement('div');
+        placeholder.className='ref-placeholder'; placeholder.textContent=refNames[id];
+        tile.appendChild(placeholder);
+      }
+      const info=document.createElement('div'); info.className='ref-info';
+      const name=document.createElement('strong'); name.textContent=entry.file.name; name.title=entry.file.name;
+      const size=document.createElement('small'); size.textContent=`${(entry.file.size/1024/1024).toFixed(1)} МБ`;
+      info.append(name,size);
+      const remove=document.createElement('button'); remove.type='button'; remove.className='ref-remove';
+      remove.textContent='×'; remove.setAttribute('aria-label',`Удалить ${entry.file.name}`);
+      remove.onclick=()=>{
+        if(entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+        selectedRefs[id].splice(index,1);
+        document.getElementById('refMessage').textContent='';
+        renderRefs();
+      };
+      tile.append(info,remove); preview.appendChild(tile);
+    });
+  }
+}
 for(const id of ['imgs','vids','auds']){
   document.getElementById(id).addEventListener('change',event=>{
-    const label=event.target.closest('.ref');
-    const count=event.target.files.length;
-    label.querySelector('small').textContent=count?`${count} файл${count===1?'':count<5?'а':'ов'} выбрано`:({imgs:'До 8 файлов',vids:'До 3 файлов',auds:'До 3 файлов'}[id]);
+    const entries=selectedRefs[id];
+    let overLimit=false;
+    for(const file of event.target.files){
+      const duplicate=entries.some(item=>item.file.name===file.name &&
+        item.file.size===file.size && item.file.lastModified===file.lastModified);
+      if(duplicate) continue;
+      if(entries.length>=refLimits[id]){overLimit=true;continue;}
+      entries.push({file,previewUrl:id==='imgs'?URL.createObjectURL(file):null});
+    }
+    event.target.value='';
+    renderRefs();
+    document.getElementById('refMessage').textContent=overLimit?
+      `Лимит: не более ${refLimits[id]} файлов для ${refNames[id]}.`:'';
   });
 }
 const apiMessage=document.getElementById('apiMessage');

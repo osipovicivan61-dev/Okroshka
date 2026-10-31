@@ -17,7 +17,7 @@ from http.cookiejar import CookieJar
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "8765"))
-APP_VERSION = "2026-10-31-upload-fix-2"
+APP_VERSION = "2026-10-31-ref-preview-v3"
 DATA_DIR = os.path.abspath(os.environ.get(
     "OKROSHKAI_DATA_DIR", os.path.dirname(os.path.abspath(__file__))))
 os.makedirs(DATA_DIR, exist_ok=True)
