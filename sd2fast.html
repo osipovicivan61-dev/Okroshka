@@ -345,7 +345,7 @@ document.getElementById("go").onclick = async ()=>{
     }
     if(!r.ok || !j.job) throw new Error(j.error || ("HTTP "+r.status));
 
-    const deadline=Date.now()+20*60*1000;
+    const deadline=Date.now()+11*60*1000;
     let url=null;
     let statusFailures=0;
     while(Date.now()<deadline && !cancelled){
@@ -364,13 +364,19 @@ document.getElementById("go").onclick = async ()=>{
       if(!response.ok) throw new Error(`ошибка проверки результата: HTTP ${response.status}`);
       statusFailures=0;
       const s=await readJson(response,"Проверка результата");
+      if(s.phase){
+        const labels={pending:"в очереди",queued:"в очереди",processing:"обрабатывается",running:"обрабатывается",completed:"готово",failed:"ошибка"};
+        phase=s.phase.startsWith("Генерация видео:")
+          ? "Генерация видео: "+(labels[s.upstream_status]||s.upstream_status||"в процессе")
+          : s.phase;
+      }
       if(s.state==="done"){
         if(!s.url) throw new Error("генерация завершена, но ссылка на видео не получена");
         url=s.url; break;
       }
       if(s.state==="error") throw new Error(s.message || "failed");
     }
-    if(!url) throw new Error("время ожидания истекло; проверьте состояние сервера");
+    if(!url) throw new Error("сервер не вернул видео за 11 минут; попробуйте ещё раз позже");
 
     const wrap=document.getElementById("done");
     const v=document.createElement("video"); v.controls=true; v.autoplay=true; v.src=url;

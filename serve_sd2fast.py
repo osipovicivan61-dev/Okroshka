@@ -17,7 +17,7 @@ from http.cookiejar import CookieJar
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "8765"))
-APP_VERSION = "2026-10-31-ref-preview-v3"
+APP_VERSION = "2026-11-04-generation-status-v4"
 DATA_DIR = os.path.abspath(os.environ.get(
     "OKROSHKAI_DATA_DIR", os.path.dirname(os.path.abspath(__file__))))
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -31,6 +31,8 @@ MAX_KEYS = 5000
 MAX_EXTERNAL_TOKENS = 200
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_UPLOAD_BYTES = 129 * 1024 * 1024
+JOB_TIMEOUT_SECONDS = 10 * 60
+POLL_FAILURE_LIMIT = 5
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
@@ -189,7 +191,7 @@ def rnd(n):
     return "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(n))
 
 
-def http(op, url, data=None, headers=None, timeout=90, retries=4):
+def http(op, url, data=None, headers=None, timeout=25, retries=2):
     hdrs = {"Connection": "close"}
     if headers:
         hdrs.update(headers)
@@ -324,18 +326,36 @@ def open_session(addr, password):
     return op
 
 
+def generation_snapshot(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("invalid generation response")
+    gen = payload.get("generation")
+    if not isinstance(gen, dict):
+        gen = payload
+    status = gen.get("status") or gen.get("state") or payload.get("status") or payload.get("state") or ""
+    url = (gen.get("resultUrl") or gen.get("result_url") or gen.get("videoUrl") or
+           payload.get("resultUrl") or payload.get("result_url") or "")
+    error = gen.get("errorMessage") or gen.get("error") or payload.get("errorMessage") or payload.get("error") or ""
+    return str(status).lower(), url if isinstance(url, str) else "", str(error)[:200]
+
+
 def run_job(job_id, params):
     job = JOBS[job_id]
     step = "start"
+    started = time.monotonic()
+    deadline = started + JOB_TIMEOUT_SECONDS
     try:
         with JOBS_LOCK:
             job["state"] = "running"
+            job["phase"] = "Подготовка"
         step = "mailbox"
         try:
             addr = mailbox_tmp()
         except Exception:
             addr = mailbox_tm()
         step = "session"
+        with JOBS_LOCK:
+            job["phase"] = "Подключение к генератору"
         op = open_session(addr, "Qq" + rnd(10) + "1!")
         model = params.get("model")
         if model not in ("fast", "sd2"):
@@ -352,6 +372,10 @@ def run_job(job_id, params):
         if is_fast and dur > 12:
             dur = 12
         step = "create"
+        if time.monotonic() >= deadline:
+            raise RuntimeError("подготовка заняла слишком много времени")
+        with JOBS_LOCK:
+            job["phase"] = "Отправка задания"
         body = {
             "model": "seedance2",
             "prompt": params.get("prompt", ""),
@@ -379,48 +403,73 @@ def run_job(job_id, params):
             except (ValueError, AttributeError):
                 pass
             raise RuntimeError("gen " + str(st) + (": " + str(detail)[:160] if detail else ""))
-        gen = json.loads(resp).get("generation") or {}
-        gid = gen.get("id")
+        created = json.loads(resp)
+        gen = created.get("generation") or {}
+        gid = gen.get("id") or created.get("id")
         if not gid:
             raise RuntimeError("gen id")
-        deadline = time.time() + 20 * 60
         step = "poll"
-        while time.time() < deadline:
-            time.sleep(4)
+        failures = 0
+        polls = 0
+        last_status = ""
+        while time.monotonic() < deadline:
+            time.sleep(min(4, max(0, deadline - time.monotonic())))
+            if time.monotonic() >= deadline:
+                break
+            polls += 1
+            status = ""
+            url = ""
+            error = ""
             try:
-                st, resp = http(op, SITE + "/api/generations/%s/status" % gid)
-                s = (json.loads(resp).get("status") or "").lower()
-            except Exception:
-                time.sleep(4)
-                continue
-            if s == "completed":
-                step = "result"
-                st, resp = http(op, SITE + "/api/generations/%s" % gid)
-                url = (json.loads(resp).get("generation") or {}).get("resultUrl")
-                if not url:
-                    raise RuntimeError("no url")
+                st, resp = http(op, SITE + "/api/generations/%s/status" % gid,
+                                timeout=12, retries=1)
+                if st != 200:
+                    raise RuntimeError("HTTP " + str(st))
+                status, url, error = generation_snapshot(json.loads(resp))
+                failures = 0
+            except Exception as e:
+                failures += 1
+                with JOBS_LOCK:
+                    job["phase"] = "Проверка связи с генератором"
+                if failures >= POLL_FAILURE_LIMIT:
+                    raise RuntimeError("не удаётся получить статус генерации: " + str(e)[:140])
+            if status:
+                last_status = status
+                with JOBS_LOCK:
+                    job["upstream_status"] = status
+                    job["phase"] = "Генерация видео: " + status
+            if status in ("failed", "error", "cancelled", "canceled", "rejected"):
+                raise RuntimeError("генератор отклонил задачу" + (": " + error if error else ""))
+            if not url and (status in ("completed", "complete", "succeeded", "success", "done") or polls % 3 == 0):
+                try:
+                    st, resp = http(op, SITE + "/api/generations/%s" % gid,
+                                    timeout=12, retries=1)
+                    if st == 200:
+                        detail_status, url, detail_error = generation_snapshot(json.loads(resp))
+                        if detail_status:
+                            last_status = detail_status
+                            with JOBS_LOCK:
+                                job["upstream_status"] = detail_status
+                                job["phase"] = "Генерация видео: " + detail_status
+                        if detail_status in ("failed", "error", "cancelled", "canceled", "rejected"):
+                            raise RuntimeError("генератор отклонил задачу" + (": " + detail_error if detail_error else ""))
+                except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError):
+                    pass
+            if url:
+                if not url.startswith(("https://", "http://")):
+                    raise RuntimeError("генератор вернул некорректную ссылку на видео")
                 with JOBS_LOCK:
                     job["url"] = url
                     job["state"] = "done"
+                    job["phase"] = "Готово"
                 return
-            if s == "failed":
-                err = ""
-                try:
-                    st2, resp2 = http(op, SITE + "/api/generations/%s" % gid)
-                    err = (json.loads(resp2).get("generation") or {}).get("errorMessage") or ""
-                except Exception:
-                    pass
-                if not err:
-                    try:
-                        err = (json.loads(resp).get("errorMessage") or "")
-                    except Exception:
-                        pass
-                raise RuntimeError("failed" + ((": " + err[:200]) if err else ""))
-        raise RuntimeError("timeout")
+        raise RuntimeError("генератор не вернул видео за 10 минут" +
+                           (" (статус: " + last_status + ")" if last_status else ""))
     except Exception as e:
         with JOBS_LOCK:
             job["state"] = "error"
             job["message"] = step + ": " + str(e)[:280]
+            job["phase"] = "Ошибка"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -477,7 +526,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with JOBS_LOCK:
                 self._send(200, {"state": job["state"], "url": job.get("url"),
-                                 "message": job.get("message")})
+                                 "message": job.get("message"), "phase": job.get("phase"),
+                                 "upstream_status": job.get("upstream_status")})
             return
         if parsed.path == "/api/admin/tokens":
             if not self._admin_authorized():
@@ -498,7 +548,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with JOBS_LOCK:
                 self._send(200, {"job": jid, "state": job["state"], "url": job.get("url"),
-                                 "message": job.get("message")})
+                                 "message": job.get("message"), "phase": job.get("phase"),
+                                 "upstream_status": job.get("upstream_status")})
             return
         self._send(404, {"error": "not found"})
 
